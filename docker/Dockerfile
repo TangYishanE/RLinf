@@ -75,6 +75,7 @@ FROM base-image-platform-${PLATFORM} AS base-image-embodied-robocasa
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-robocasa365
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-isaaclab
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-robotwin
+FROM base-image-platform-${PLATFORM} AS base-image-embodied-robodojo
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-opensora
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-frankasim
 FROM base-image-platform-${PLATFORM} AS base-image-embodied-wan
@@ -427,6 +428,14 @@ RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLA
 
 # Set default env
 RUN echo "source ${UV_PATH}/openvla-oft/bin/activate" >> ~/.bashrc
+
+##################################################################################################
+# Embodied: RoboDojo (Isaac Sim runtime; scene assets mounted at run time)
+##################################################################################################
+FROM embodied-common-image AS embodied-robodojo-image
+
+RUN TEST_BUILD=1 bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openpi --model openpi --env robodojo
+RUN echo "source ${UV_PATH}/openpi/bin/activate" >> ~/.bashrc
 
 ##################################################################################################
 # Embodied: WAN

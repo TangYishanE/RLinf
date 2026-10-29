@@ -2144,3 +2144,28 @@ jobs:
         run: |
           rm -rf .venv
           uv cache prune
+
+  embodied-robodojo-env-test:
+    if: vars.ROBODOJO_ASSETS_ROOT != ''
+    runs-on: embodied
+    env:
+      ROBODOJO_ASSETS_ROOT: ${{ vars.ROBODOJO_ASSETS_ROOT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Install RoboDojo runtime
+        run: |
+          test -d "$ROBODOJO_ASSETS_ROOT/Assets"
+          bash requirements/install.sh embodied --env robodojo
+      - name: Reset and step RoboDojo
+        timeout-minutes: 20
+        run: |
+          source .venv/bin/activate
+          export REPO_PATH=$(pwd)
+          PYTHONPATH=$(pwd) python tests/e2e_tests/embodied/robodojo_env_smoke.py --output robodojo-smoke.json
+      - name: Upload environment result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robodojo-env-smoke
+          path: robodojo-smoke.json

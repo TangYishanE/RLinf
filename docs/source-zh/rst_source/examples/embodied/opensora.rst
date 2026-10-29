@@ -287,3 +287,36 @@ SFT（LoRA-base）模型设置 ``do_sample = False``；RL 训练模型在 ``roll
     * - **效果提升**
       - **+14.3%**
       - **+27.8%**
+
+RoboTwin 推理接口
+----------------------------------------
+
+使用 ``env/opensora_robotwin_place_empty_cup.yaml`` 配置，将按 ALOHA 顺序排列的 14 维关节目标交给目标域 OpenSora checkpoint。将 ``initial_image_path``、``world_model_cfg.stats_path`` 和模型/VAE 路径指向本地资产。初始化数据使用 ``action_key: abs_action``。
+
+该配置设置 ``is_eval: True``、``reward_mode: none`` 和 ``state_dim: 0``，返回头部相机图像、空本体状态和空腕部图像，奖励与预测成功率均为零。选择按相同输入训练的 image-only policy，并将实际执行 horizon 与世界模型的八步动作块对齐。policy RL 还需要训练好的目标奖励模型和真实执行命令数据。
+
+在训练统计中保留动作来源。``action_source: state_target`` 表示以记录的关节状态作为示范目标，不代表已验证与仿真命令等价。后端默认拒绝这种统计，只有在相同表示的离线评测中显式设置 ``world_model_cfg.allow_state_target_actions: True`` 才可使用。训练与推理共用 OpenSora 检出中的 ``ActionNormalizer``，因此应搭配使用两个更新后的仓库。
+
+
+RoboDojo 数据与仿真接口
+----------------------------------------
+
+使用 ``env/opensora_robodojo_put_bottles_into_dustbin.yaml``，将 ALOHA 顺序的 14 维关节目标交给 image-only 世界模型。启动前设置初始图像、RoboDojo 训练统计、模型 checkpoint 与 VAE 路径。policy 应使用单路头部图像、空本体状态和八步动作。该配置返回零奖励；物理任务成功率应在 RoboDojo 仿真器中评测。
+
+在配套 OpenSora 检出中执行 ``python -m scripts.convert_robodojo --manifest source.json --output converted``，转换显式选择的 HDF5 字段。在源清单声明四组关节路径、native/ALOHA 顺序、解码后的 RGB/BGR 顺序、控制频率、数据划分和时间对齐。转换器生成 N+1 帧 RGB 与 N 个动作，只使用 train 回合拟合归一化。运行 ``python -m scripts.train_robodojo --config config/train_robodojo_put_bottles_into_dustbin.yaml`` 训练，通过 ``python -m scripts.evaluate_robodojo`` 评测留出轨迹。各命令的必填路径见 ``--help``。微调应使用对应任务数据；公开的两条 ARX-X5 demo 是堆碗任务。
+
+若使用记录的关节状态，设置 ``action_source: state_target``、``alignment: incoming``，以 state t+1 作为 image t 到 image t+1 的目标。只在相同表示的离线评测中启用 ``allow_state_target_actions``。仿真命令评测需要记录的真实命令，以及按同一命令接口训练的 checkpoint。
+
+在 Linux x86_64 与 NVIDIA CUDA 环境安装独立的物理仿真器：
+
+.. code-block:: bash
+
+   export ROBODOJO_ASSETS_ROOT=/data/robodojo
+   bash requirements/install.sh embodied --env robodojo
+   source .venv/bin/activate
+   export REPO_PATH=$(pwd)
+   python tests/e2e_tests/embodied/robodojo_env_smoke.py --output robodojo-smoke.json
+
+此命令安装固定版本的 runtime、Isaac Sim 5.1 与 IsaacLab 依赖，然后重置布局 0，保持测得关节目标并执行两次动作块。先将仿真资产放到 ``$ROBODOJO_ASSETS_ROOT/Assets``。安装器为 Isaac Sim 设置 ``OMNI_KIT_ACCEPT_EULA=YES``。构建物理仿真 Docker 镜像时选择 ``BUILD_TARGET=embodied-robodojo``。当仓库变量 ``ROBODOJO_ASSETS_ROOT`` 指向 embodied runner 的资产目录时，CI 才会运行仿真 smoke job。
+
+``env/robodojo_put_bottles_into_dustbin.yaml`` 选择物理接口，默认 native 顺序为 [左臂，右臂，左夹爪，右夹爪]；ALOHA policy 应设置 ``state_action_order: aloha``。保持 ``enable_offload: False``，关闭仿真器会永久释放资源。reset 重试返回尝试次数与实际布局 ID。历史 JSON 字段 ``success_seeds`` 存放布局 ID，并非测得的 policy 成功样本。CPU 测试使用外部 runtime 替身验证适配接口；真实仿真和完整 OpenSora CUDA 运行需要准备资产与 checkpoint 后单独验证。

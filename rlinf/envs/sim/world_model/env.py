@@ -67,6 +67,20 @@ class WorldModelEnv:
         self.supports_kir = self._backend_cls.supports_kir
 
         self.cfg = cfg
+        self.action_dim = int(cfg.get("action_dim", DEFAULT_ACTION_DIM))
+        self.state_dim = int(cfg.get("state_dim", 16))
+        self.reward_mode = cfg.get("reward_mode", "model")
+        if self.action_dim <= 0 or self.state_dim < 0:
+            raise ValueError("Expected positive action_dim and nonnegative state_dim")
+        if self.reward_mode not in ("model", "none"):
+            raise ValueError("Expected reward_mode 'model' or 'none'")
+        if self.reward_mode == "none" and not cfg.get("is_eval", False):
+            raise ValueError("reward_mode='none' is only supported for evaluation")
+        if cfg.get("wm_env_type", "libero") in ("robotwin", "robodojo"):
+            if self.action_dim != 14 or self.state_dim != 0:
+                raise ValueError(
+                    "Dual-arm OpenSora requires action_dim=14 and state_dim=0; use an image-only policy"
+                )
         self.device = torch.device(Worker.torch_device_type or "cpu")
 
         self.seed = cfg.seed + seed_offset
@@ -126,7 +140,9 @@ class WorldModelEnv:
         self.image_size = self.backend.image_size
 
         self.reward_model = (
-            self._backend_cls.load_reward_model(self.cfg).eval().to(self.device)
+            None
+            if self.reward_mode == "none"
+            else (self._backend_cls.load_reward_model(self.cfg).eval().to(self.device))
         )
 
         # Initialize state
@@ -217,7 +233,10 @@ class WorldModelEnv:
                 )
             self.enable_kir = False
         return NpyTrajectoryDatasetWrapper(
-            cfg.initial_image_path, enable_kir=self.enable_kir
+            cfg.initial_image_path,
+            enable_kir=self.enable_kir,
+            action_key=cfg.get("action_key", "delta_action"),
+            state_key=cfg.get("state_key", "init_ee_pose"),
         )
 
     def _record_metrics(self, step_reward, terminations, infos):
@@ -262,6 +281,8 @@ class WorldModelEnv:
 
         Success is estimated when a chunk reward exceeds a threshold (default: 0.9).
         """
+        if self.reward_mode == "none":
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         success_threshold = getattr(self.cfg, "success_reward_threshold", 0.9)
 
         # chunk_rewards shape: [num_envs, chunk]
@@ -312,7 +333,11 @@ class WorldModelEnv:
         else:
             init_ee_pose = None
 
-        action_dim = getattr(self.cfg, "action_dim", DEFAULT_ACTION_DIM)
+        action_dim = self.action_dim
+        if first_frame["action"].shape != (action_dim,):
+            raise ValueError(
+                f"Expected reset action dimension {action_dim}, got {first_frame['action'].shape}"
+            )
 
         # Repeat to fill condition frames: [3, H, W] -> [3, condition_frame_length, H, W]
         env_img_tensor = self._to_condition_frame(first_frame["image"]).unsqueeze(1)
@@ -514,6 +539,8 @@ class WorldModelEnv:
 
     def _infer_next_chunk_rewards(self):
         """Predict the reward of the chunk just generated."""
+        if self.reward_mode == "none":
+            return torch.zeros((self.num_envs, self.chunk), device=self.device)
         if self.reward_model is None:
             raise ValueError("Reward model is not loaded")
 
@@ -584,7 +611,9 @@ class WorldModelEnv:
         full_image = full_image.to(torch.uint8)
 
         # Get states (dummy for now, can be extended)
-        states = torch.zeros((num_envs, 16), device=self.device, dtype=torch.float32)
+        states = torch.zeros(
+            (num_envs, self.state_dim), device=self.device, dtype=torch.float32
+        )
 
         # Wrap observation - format aligned with libero_env.
         # Copy task_descriptions: a subset reset mutates the env list in place, and
@@ -692,7 +721,8 @@ class WorldModelEnv:
         if self._is_offloaded:
             return
         self.backend.offload()
-        self.reward_model = self.reward_model.to("cpu")
+        if self.reward_model is not None:
+            self.reward_model = self.reward_model.to("cpu")
         self.current_obs = recursive_to_device(self.current_obs, "cpu")
         self.prev_step_reward = self.prev_step_reward.cpu()
         self._elapsed_steps = self._elapsed_steps.cpu()
@@ -708,7 +738,8 @@ class WorldModelEnv:
         if not self._is_offloaded:
             return
         self.backend.onload()
-        self.reward_model = self.reward_model.to(self.device)
+        if self.reward_model is not None:
+            self.reward_model = self.reward_model.to(self.device)
         self.current_obs = recursive_to_device(self.current_obs, self.device)
         self.prev_step_reward = self.prev_step_reward.to(self.device)
         self._elapsed_steps = self._elapsed_steps.to(self.device)

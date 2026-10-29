@@ -1,0 +1,13 @@
+defaults:
+  - opensora_robotwin_place_empty_cup
+  - _self_
+
+task_suite_name: robodojo_put_bottles_into_dustbin
+wm_env_type: robodojo
+initial_image_path: /data/robodojo/converted/init
+max_episode_steps: 696
+max_steps_per_rollout_epoch: 696
+world_model_cfg:
+  stats_path: /data/robodojo/converted/dataset_statistics.json
+  model:
+    from_pretrained: /models/robodojo/put_bottles_into_dustbin/model.pt

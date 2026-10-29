@@ -58,6 +58,7 @@ jobs:
               - 'pyproject.toml'
               - 'requirements/*.sh'
               - 'requirements/*.txt'
+              - 'requirements/embodied/envs/robodojo-override.txt'
               - '.github/workflows/install.yml'
             docker_filter: &docker
               - *install
@@ -186,6 +187,10 @@ jobs:
               # test_data.py loads this script to test reward split preprocessing.
               - 'examples/reward/preprocess_reward_dataset.py'
               - 'tests/unit_tests/**'
+              - 'tests/robot_mocks/robodojo_runtime/**'
+              - 'tests/e2e_tests/embodied/robodojo_env_smoke.py'
+              - 'evaluations/robodojo/**'
+              - 'examples/embodiment/config/env/*robodojo*.yaml'
               - 'tests/conftest.py'
               - '.github/workflows/unit-tests.yml'
             scheduler_test_filter: &scheduler

@@ -14,17 +14,14 @@
 
 from __future__ import annotations
 
-import json
-import os
 from collections import deque
 from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
 from omegaconf import OmegaConf
+from opensora.action_stats import ActionNormalizer
 from opensora.registry import MODELS, SCHEDULERS, build_module
-from opensora.utils.inference_utils import prepare_multi_resolution_info
-from opensora.utils.misc import to_torch_dtype
 
 from rlinf.envs.sim.world_model.registry import register_backend
 from rlinf.envs.utils import recursive_to_device
@@ -48,7 +45,6 @@ class OpenSoraBackend:
         self.cfg = cfg
         self.wm_cfg = cfg.world_model_cfg
         self.device = device
-        self.inference_dtype = to_torch_dtype(self.wm_cfg.get("dtype", "bf16"))
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
@@ -56,6 +52,28 @@ class OpenSoraBackend:
         self.condition_frame_length = self.wm_cfg.condition_frame_length  # To
         self.num_frames = self.chunk + self.condition_frame_length
         self.image_size = tuple(self.wm_cfg.image_size)
+        self.action_dim = int(self.wm_cfg.model.action_dim)
+        if (
+            min(
+                self.chunk,
+                self.condition_frame_length,
+                self.action_dim,
+                *self.image_size,
+            )
+            <= 0
+        ):
+            raise ValueError("OpenSora generation geometry must be positive")
+        if (
+            self.wm_cfg.vae.type == "SDXL"
+            and self.wm_cfg.model.pad_action_num != self.condition_frame_length
+        ):
+            raise ValueError("SDXL pad_action_num must match condition_frame_length")
+
+        self.action_stats = self._load_action_stats()
+        from opensora.utils.inference_utils import prepare_multi_resolution_info
+        from opensora.utils.misc import to_torch_dtype
+
+        self.inference_dtype = to_torch_dtype(self.wm_cfg.get("dtype", "bf16"))
 
         self.vae = self._load_vae().eval().to(self.device, self.inference_dtype)
         self.model = self._load_model().eval().to(self.device, self.inference_dtype)
@@ -70,8 +88,6 @@ class OpenSoraBackend:
             if self.is_vae_v1_2
             else self.condition_frame_length
         )
-
-        self.action_stats = self._load_action_stats()
 
         self.fps = self.wm_cfg.get("fps", 3.0)
         self.multi_resolution = self.wm_cfg.get("multi_resolution", "STDiT2")
@@ -114,22 +130,32 @@ class OpenSoraBackend:
         scheduler_cfg = OmegaConf.to_container(self.wm_cfg.scheduler, resolve=True)
         return build_module(scheduler_cfg, SCHEDULERS)
 
-    def _load_action_stats(self) -> dict[str, np.ndarray]:
+    def _load_action_stats(self) -> ActionNormalizer:
         stats_path = self.wm_cfg.get("stats_path", None)
-        if stats_path is None or not os.path.exists(stats_path):
-            raise ValueError(f"Action stats path {stats_path} does not exist")
-        with open(stats_path, "r") as f:
-            stats = json.load(f)
-        return {
-            "q01": np.asarray(stats["action"]["q01"], np.float32),
-            "q99": np.asarray(stats["action"]["q99"], np.float32),
-        }
+        if stats_path is None:
+            raise ValueError("OpenSora requires world_model_cfg.stats_path")
+        normalizer = ActionNormalizer.from_file(
+            stats_path, self.action_dim, self.wm_cfg.get("stats_key", None)
+        )
+        if normalizer.benchmark is not None and normalizer.benchmark != self.cfg.get(
+            "wm_env_type", "libero"
+        ):
+            raise ValueError(
+                "World-model benchmark and action statistics benchmark must match"
+            )
+        if normalizer.action_source == "state_target" and not self.wm_cfg.get(
+            "allow_state_target_actions", False
+        ):
+            raise ValueError(
+                "This checkpoint conditions on recorded state targets, not executed "
+                "commands. Set allow_state_target_actions only for offline evaluation "
+                "of the same representation."
+            )
+        return normalizer
 
     def _normalize_action(self, actions: np.ndarray) -> np.ndarray:
         """Map actions into ``[-1, 1]`` with the dataset's q01 / q99 statistics."""
-        q01 = self.action_stats["q01"]
-        q99 = self.action_stats["q99"]
-        return 2 * ((actions - q01) / (q99 - q01)) - 1
+        return self.action_stats(actions)
 
     def open_session(
         self,
@@ -190,14 +216,16 @@ class OpenSoraBackend:
         actions: torch.Tensor,
     ) -> torch.Tensor:
         batch_size = len(env_ids)
-        if actions.shape[0] != batch_size:
+        if tuple(actions.shape) != (batch_size, self.chunk, self.action_dim):
             raise ValueError(
-                f"env_ids and actions must describe the same batch rows; got "
-                f"{batch_size}, {actions.shape[0]}"
+                f"Expected actions {(batch_size, self.chunk, self.action_dim)}, "
+                f"got {tuple(actions.shape)}"
             )
 
         actions_np = (
-            actions if isinstance(actions, np.ndarray) else actions.cpu().numpy()
+            actions
+            if isinstance(actions, np.ndarray)
+            else actions.detach().float().cpu().numpy()
         )
         actions_batch = (
             torch.from_numpy(self._normalize_action(actions_np))

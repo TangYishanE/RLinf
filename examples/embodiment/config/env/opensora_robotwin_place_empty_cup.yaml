@@ -1,0 +1,22 @@
+defaults:
+  - opensora_libero_spatial
+  - _self_
+
+task_suite_name: robotwin_place_empty_cup
+wm_env_type: robotwin
+action_dim: 14
+action_key: abs_action
+state_dim: 0
+reset_gripper_open: False
+is_eval: True
+# Inference-only: zero rewards convey no task-success estimate.
+reward_mode: none
+max_episode_steps: 200
+max_steps_per_rollout_epoch: 200
+initial_image_path: /data/robotwin/converted/init
+world_model_cfg:
+  stats_path: /data/robotwin/converted/dataset_statistics.json
+  model:
+    action_dim: 14
+    from_pretrained: /models/robotwin/place_empty_cup/model.pt
+  reward_model: null

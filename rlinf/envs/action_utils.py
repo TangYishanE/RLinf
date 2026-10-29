@@ -350,12 +350,20 @@ def prepare_actions(
             model_type=model_type,
         )
     elif env_type == SupportedEnvType.WORLD_MODEL:
-        # TODO: Implement prepare_actions_for_opensora_wm
         if wm_env_type == "libero":
             chunk_actions = prepare_actions_for_libero(
                 raw_chunk_actions=raw_chunk_actions,
                 model_type=model_type,
             )
+        elif wm_env_type in ("robotwin", "robodojo"):
+            if raw_chunk_actions.ndim != 3 or raw_chunk_actions.shape[-1] != 14:
+                raise ValueError(
+                    f"{wm_env_type} world-model actions must have shape [batch, chunk, 14], "
+                    f"got {raw_chunk_actions.shape}"
+                )
+            if not np.isfinite(raw_chunk_actions).all():
+                raise ValueError(f"{wm_env_type} world-model actions must be finite")
+            chunk_actions = raw_chunk_actions
         else:
             raise NotImplementedError(f"Env type {wm_env_type} not implemented")
     elif (
@@ -369,7 +377,7 @@ def prepare_actions(
             action_scale=action_scale,
             policy=policy,
         )
-    elif env_type == SupportedEnvType.ROBOTWIN:
+    elif env_type in (SupportedEnvType.ROBOTWIN, SupportedEnvType.ROBODOJO):
         chunk_actions = raw_chunk_actions
     elif env_type == SupportedEnvType.EMBODICHAIN:
         chunk_actions = raw_chunk_actions

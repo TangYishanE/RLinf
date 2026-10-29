@@ -291,3 +291,78 @@ trials) per suite. SFT (LoRA-base) models use ``do_sample = False``; RL-trained 
     * - **Improvement**
       - **+25.3%**
       - **+12.9%**
+
+RoboTwin inference adapter
+----------------------------------------
+
+Use ``env/opensora_robotwin_place_empty_cup.yaml`` to replay 14-dimensional
+ALOHA-ordered joint targets through a target-domain OpenSora checkpoint. Set
+``initial_image_path``, ``world_model_cfg.stats_path`` and the model/VAE paths
+to local assets. The reset dataset uses ``action_key: abs_action``.
+
+This preset selects ``is_eval: True``, ``reward_mode: none`` and ``state_dim: 0``.
+It returns head-camera images, empty proprioception and no wrist images, with
+zero rewards and zero predicted success. Select an image-only policy trained
+for these inputs and match its executed horizon to the eight-step world model.
+Policy RL requires a trained target reward model and executed-command data.
+
+Keep action provenance with the training statistics. ``action_source: state_target``
+identifies recorded joint states used as demonstration targets; it does not
+establish equivalence to simulator commands. The backend rejects these statistics
+unless ``world_model_cfg.allow_state_target_actions: True`` is explicitly enabled
+for offline evaluation of the same representation. Training and inference share
+the OpenSora checkout's ``ActionNormalizer``; use both updated checkouts together.
+
+
+RoboDojo data and simulator adapters
+------------------------------------
+
+Use ``env/opensora_robodojo_put_bottles_into_dustbin.yaml`` for image-only
+world-model inference with 14-dimensional ALOHA joint targets. Set the initial
+images, RoboDojo training statistics, model checkpoint and VAE paths before
+launch. Match the policy to one head image, empty proprioception and eight-step
+actions. This preset returns zero reward; evaluate physical task success with
+the RoboDojo simulator.
+
+Convert explicitly selected HDF5 fields in the paired OpenSora checkout with
+``python -m scripts.convert_robodojo --manifest source.json --output converted``.
+Declare the four joint-group paths, native/ALOHA order, decoded RGB/BGR order,
+control frequency, split and alignment in the source manifest. The converter
+produces N+1 RGB frames and N actions, and fits normalization on train episodes.
+Train with ``python -m scripts.train_robodojo --config config/train_robodojo_put_bottles_into_dustbin.yaml``
+and evaluate held-out trajectories with ``python -m scripts.evaluate_robodojo``.
+Pass the required paths shown by each command's ``--help``. Use target-task data
+for fine-tuning; the released two-file ARX-X5 demo contains bowl stacking.
+
+For recorded joint states, select ``action_source: state_target`` and
+``alignment: incoming`` to use state t+1 as the target between images t and t+1.
+Enable ``allow_state_target_actions`` only for offline evaluation of that
+representation. Simulator-command evaluation requires recorded commands and a
+checkpoint trained with the same command contract.
+
+Install the separate physical simulator on Linux x86_64 with NVIDIA CUDA:
+
+.. code-block:: bash
+
+   export ROBODOJO_ASSETS_ROOT=/data/robodojo
+   bash requirements/install.sh embodied --env robodojo
+   source .venv/bin/activate
+   export REPO_PATH=$(pwd)
+   python tests/e2e_tests/embodied/robodojo_env_smoke.py --output robodojo-smoke.json
+
+This installs the pinned runtime, Isaac Sim 5.1 and IsaacLab dependencies, then
+resets layout 0 and holds its measured joints for two action chunks. Place the
+simulation assets under ``$ROBODOJO_ASSETS_ROOT/Assets`` first. The installer
+sets ``OMNI_KIT_ACCEPT_EULA=YES`` for Isaac Sim. Select
+``BUILD_TARGET=embodied-robodojo`` to build the physical simulator Docker image.
+The CI simulator smoke job runs when the repository variable
+``ROBODOJO_ASSETS_ROOT`` points to assets on the embodied runner.
+
+``env/robodojo_put_bottles_into_dustbin.yaml`` selects the physical adapter.
+Its native layout is [left arm, right arm, left gripper, right gripper]; select
+``state_action_order: aloha`` for ALOHA policies. Keep ``enable_offload: False``:
+closing the simulator releases it permanently. Reset retries report their
+attempt count and selected layout IDs. The legacy ``success_seeds`` JSON field
+stores layout IDs, rather than measured policy successes. CPU tests cover the
+adapter through a fake vendor runtime; real simulator and full OpenSora CUDA
+runs require separate validation with assets and checkpoints.
