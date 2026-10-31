@@ -148,3 +148,41 @@ RoboDojo 的典型评测流程可以理解为：
 
 
 
+## RoboDojo / XPolicyLab 接口要求
+
+根据 RoboDojo 与 XPolicyLab 官方仓库，RoboDojo 当前为 eval-only，policy 的集成和 policy server 由 XPolicyLab 负责。
+
+一个 XPolicyLab policy 至少需要提供：
+
+* `eval.sh`
+* `deploy.yml`
+
+其中：
+
+* `eval.sh` 用于启动 policy 的评测流程
+* `deploy.yml` 用于声明 policy server 的 host、port、action mode 和 policy 运行配置
+
+RoboDojo 的典型单机评测流程为：
+
+RoboDojo CLI
+→ 启动 XPolicyLab policy server
+→ 启动 RoboDojo simulator client
+→ client 将 observation 发送给 policy server
+→ policy server 返回 action
+→ RoboDojo 执行动作并继续评测
+
+默认通信方式为 WebSocket。
+
+因此，RLinf 接入 RoboDojo 的一个可行方向是：
+
+为 RLinf 模型实现一个 XPolicyLab policy adapter，使 RLinf 的模型能够通过 XPolicyLab policy server 接收 observation，并返回 RoboDojo 所需的 action。
+
+当前还需要继续确认：
+
+1. observation 的具体字段
+2. action 的具体维度与格式
+3. RLinf 当前模型输入输出如何转换
+4. 是否已有相近的 XPolicyLab policy adapter 可以参考
+
+
+
