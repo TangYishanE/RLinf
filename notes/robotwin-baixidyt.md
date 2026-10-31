@@ -116,3 +116,35 @@ RLinf 已经具备 RoboTwin 的基础环境适配，因此现阶段的主要任�
 
 
 
+## RoboDojo 接入初步调研
+
+RoboDojo 当前官方发布以 evaluation 为主。RoboDojo 本身负责仿真客户端、任务、资产、配置以及评测结果生成；policy 的集成与 policy server 由 XPolicyLab 负责。
+
+官方仓库中的关键结构包括：
+
+* `env/`：仿真环境底层与管理模块
+* `env_cfg/`：仿真、场景、机器人和相机配置
+* `task/RoboDojo/`：RoboDojo 任务逻辑与任务配置
+* `scripts/robodojo.sh`：RoboDojo 官方评测入口
+* `scripts/eval_policy.sh`：由 XPolicyLab 调用的仿真客户端入口
+* `XPolicyLab/`：policy server 与不同模型的集成
+
+RoboDojo 的典型评测流程可以理解为：
+
+模型 / Policy
+→ XPolicyLab policy server
+→ RoboDojo simulator client
+→ RoboDojo 仿真任务
+→ 返回 observation、动作执行结果和评测指标
+
+因此，RLinf 接入 RoboDojo 的潜在重点不是首先重写一套仿真环境，而是研究 RLinf 当前模型推理接口如何适配 XPolicyLab 的 policy server 接口。
+
+下一步需要继续确认：
+
+1. XPolicyLab 对 policy server 的接口要求
+2. observation 的数据格式
+3. action 的数据格式
+4. RLinf 当前模型输出是否可以直接转换为该 action 格式
+
+
+
